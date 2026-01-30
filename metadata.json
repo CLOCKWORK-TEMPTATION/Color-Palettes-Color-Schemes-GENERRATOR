@@ -1,0 +1,5 @@
+{
+  "name": "ChromaGen AI",
+  "description": "An intelligent color palette generator powered by Gemini. Describe a mood, theme, or object, and get a perfectly curated color scheme with hex codes and design rationale.",
+  "requestFramePermissions": []
+}
