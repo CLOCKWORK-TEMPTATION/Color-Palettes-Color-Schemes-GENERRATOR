@@ -5,6 +5,7 @@ import { AiService } from './services/ai.service';
 import { AuthService } from './services/auth.service';
 import { ExportService } from './services/export.service';
 import { ColorMathService, RGBColor } from './services/color-math.service';
+import { PreferenceLearningService } from './services/preference-learning.service';
 import { Palette, Color, HistoryItem } from './types';
 import { LoaderComponent } from './components/loader.component';
 import { CopyIconComponent } from './components/copy-icon.component';
@@ -23,38 +24,69 @@ import { AuthModalComponent } from './components/auth-modal.component';
   `]
 })
 export class AppComponent implements OnInit {
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Dependency Injection
+  // ═══════════════════════════════════════════════════════════════════════════
+  
   private aiService = inject(AiService);
   private mathService = inject(ColorMathService);
-  authService = inject(AuthService); // Public for template
   private exportService = inject(ExportService);
+  
+  // Public services for template access
+  authService = inject(AuthService);
+  preferenceLearning = inject(PreferenceLearningService);
 
-  // UI State
+  // ═══════════════════════════════════════════════════════════════════════════
+  // UI State Signals
+  // ═══════════════════════════════════════════════════════════════════════════
+  
   prompt = signal('');
   isLoading = signal(false);
+  isTraining = signal(false);
   
-  // Single palette view
+  // Palette state
   currentPalette = signal<Palette | null>(null);
-  
-  // Variations view (when Hex is entered)
   variations = signal<Palette[]>([]);
-
   history = signal<HistoryItem[]>([]);
+  
+  // UI state
   error = signal<string | null>(null);
   toastMessage = signal<string | null>(null);
   showAuthModal = signal(false);
-  
-  // View mode: 'generator' or 'profile'
   viewMode = signal<'generator' | 'profile'>('generator');
 
-  // Derived state
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Computed Properties
+  // ═══════════════════════════════════════════════════════════════════════════
+  
   hasPalette = computed(() => !!this.currentPalette());
+  
   isCurrentSaved = computed(() => {
     const p = this.currentPalette();
     return p ? this.authService.isSaved(p.id) : false;
   });
 
+  // ML Learning State
+  learningState = computed(() => this.preferenceLearning.modelState());
+  learningConfidence = computed(() => this.preferenceLearning.confidence());
+  isModelReady = computed(() => this.preferenceLearning.isReady());
+  
+  // Progress for UI (percentage)
+  learningProgress = computed(() => {
+    const samples = this.learningState().samplesCount;
+    const minRequired = 20;
+    return Math.min(100, (samples / minRequired) * 100);
+  });
+
+  // Can train?
+  canTrain = computed(() => this.learningState().samplesCount >= 20);
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Lifecycle
+  // ═══════════════════════════════════════════════════════════════════════════
+
   constructor() {
-    // Load history
+    // Load history from localStorage
     const saved = localStorage.getItem('chromagen_history');
     if (saved) {
       try {
@@ -69,7 +101,9 @@ export class AppComponent implements OnInit {
     this.checkSharedUrl();
   }
 
-  // --- Core Logic ---
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Core Generation Logic
+  // ═══════════════════════════════════════════════════════════════════════════
 
   async generate() {
     const input = this.prompt().trim();
@@ -103,8 +137,6 @@ export class AppComponent implements OnInit {
         }));
 
         this.variations.set(newPalettes);
-        // We don't auto-add to history here, maybe only when they select one? 
-        // Or we can add the input to history but that's complex with multiple results.
         
       } else {
         // Handle Text Prompt Generation
@@ -135,7 +167,6 @@ export class AppComponent implements OnInit {
 
   selectVariation(palette: Palette) {
     this.currentPalette.set(palette);
-    // Add to history when selected
     this.addToHistory(`Variation: ${palette.paletteName}`, palette);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
@@ -176,7 +207,10 @@ export class AppComponent implements OnInit {
     }
   }
 
-  // Uses the local mathematical service to generate the anti-palette
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Anti-Palette Generation (Enhanced with ML)
+  // ═══════════════════════════════════════════════════════════════════════════
+
   async generateAntiPalette() {
     const current = this.currentPalette();
     if (!current) return;
@@ -199,33 +233,55 @@ export class AppComponent implements OnInit {
           throw new Error('Could not calculate anti-palette');
         }
 
-        // Convert Math RGB colors to App Colors
-        const generatedColors = result.palette.colors.map((rgb: RGBColor, index: number) => {
-           const hex = rgb.toHex();
-           const { textColor, luminance } = this.getContrastColor(hex);
-           return {
-             hex: hex,
-             rgb: `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`,
-             hsl: '', // Optional
-             name: `DeltaE Match #${index + 1}`, // Temporary name
-             description: `Mathematically distant color (DeltaE metric)`,
-             textColor,
-             luminance
-           };
+        // Get candidate colors from math service
+        let candidateHexColors = result.palette.colors.map((rgb: RGBColor) => rgb.toHex());
+
+        // ═══════════════════════════════════════════════════════════════════
+        // ML Enhancement: Sort by learned dislike probability
+        // ═══════════════════════════════════════════════════════════════════
+        let enhancementNote = '';
+        if (this.isModelReady()) {
+          // ترتيب الألوان حسب احتمال أن تكون مكروهة (الأقل تفضيلاً أولاً)
+          candidateHexColors = this.preferenceLearning.enhanceAntiPaletteGeneration(candidateHexColors);
+          enhancementNote = ` | AI Confidence: ${(this.learningConfidence() * 100).toFixed(0)}%`;
+        }
+
+        // Convert to App Colors
+        const generatedColors = candidateHexColors.map((hex: string, index: number) => {
+          const { textColor, luminance } = this.getContrastColor(hex);
+          const r = parseInt(hex.slice(1, 3), 16);
+          const g = parseInt(hex.slice(3, 5), 16);
+          const b = parseInt(hex.slice(5, 7), 16);
+          
+          return {
+            hex: hex,
+            rgb: `rgb(${r}, ${g}, ${b})`,
+            hsl: '',
+            name: `Anti-Color #${index + 1}`,
+            description: this.isModelReady() 
+              ? `Mathematically & perceptually distant (ML enhanced)`
+              : `Mathematically distant color (DeltaE metric)`,
+            textColor,
+            luminance
+          };
         });
 
-        // Use AI only to "Enhance" the names if needed, or just display raw math results.
-        // For speed and robustness of the "merge", we display the math results directly.
         const newPalette: Palette = {
           id: crypto.randomUUID(),
-          paletteName: `Anti-Palette (Math Generated)`,
-          description: `Generated using CIEDE2000 algorithm. Avg Distance: ${result.distance.toFixed(2)}. Method: ${result.method}.`,
+          paletteName: this.isModelReady() ? `Anti-Palette (ML Enhanced)` : `Anti-Palette (Math Generated)`,
+          description: `Generated using CIEDE2000 algorithm. Avg Distance: ${result.distance.toFixed(2)}. Method: ${result.method}${enhancementNote}`,
           colors: generatedColors,
           createdAt: Date.now()
         };
 
         this.currentPalette.set(newPalette);
         this.addToHistory(`Anti-Palette: ${current.paletteName}`, newPalette);
+
+        // ═══════════════════════════════════════════════════════════════════
+        // ML Learning: Record these colors as disliked
+        // ═══════════════════════════════════════════════════════════════════
+        this.preferenceLearning.addDislikedColors(candidateHexColors, 'antiPalette');
+
       } catch (err) {
         this.error.set('Failed to generate anti-palette.');
         console.error(err);
@@ -235,12 +291,13 @@ export class AppComponent implements OnInit {
     }, 100);
   }
 
-  // --- Sharing & URL ---
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Sharing & URL
+  // ═══════════════════════════════════════════════════════════════════════════
 
   checkSharedUrl() {
     if (typeof window === 'undefined') return;
     
-    // Check for #share=BASE64_JSON
     const hash = window.location.hash;
     if (hash.startsWith('#share=')) {
       try {
@@ -248,7 +305,6 @@ export class AppComponent implements OnInit {
         const jsonStr = atob(encoded);
         const palette = JSON.parse(jsonStr);
         
-        // Recalculate text contrast to be safe
         palette.colors = palette.colors.map((c: any) => {
           const { textColor, luminance } = this.getContrastColor(c.hex);
           return { ...c, textColor, luminance };
@@ -258,7 +314,6 @@ export class AppComponent implements OnInit {
         this.prompt.set(`Shared: ${palette.paletteName}`);
         this.showToast('Shared palette loaded!');
         
-        // Clear hash to clean up URL
         history.replaceState(null, '', window.location.pathname);
       } catch (e) {
         this.error.set('Invalid shared link.');
@@ -280,7 +335,9 @@ export class AppComponent implements OnInit {
     });
   }
 
-  // --- Export ---
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Export
+  // ═══════════════════════════════════════════════════════════════════════════
 
   export(format: 'css' | 'json' | 'png') {
     const p = this.currentPalette();
@@ -291,7 +348,9 @@ export class AppComponent implements OnInit {
     if (format === 'png') this.exportService.exportPng(p);
   }
 
-  // --- Auth & Persistence ---
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Auth & Persistence (with ML Learning Integration)
+  // ═══════════════════════════════════════════════════════════════════════════
 
   handleAuthSubmit(username: string) {
     this.authService.login(username);
@@ -314,14 +373,138 @@ export class AppComponent implements OnInit {
     } else {
       this.authService.savePalette(p);
       this.showToast('Palette saved to profile');
+      
+      // ═══════════════════════════════════════════════════════════════════
+      // ML Learning: Record saved colors as preferred
+      // ═══════════════════════════════════════════════════════════════════
+      const hexColors = p.colors.map(c => c.hex);
+      this.preferenceLearning.addPreferredColors(hexColors, 'saved');
     }
   }
 
-  // --- Utilities ---
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ML Learning Controls
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * تسجيل تفاعل المستخدم مع لون (نقرة = تفضيل ضمني)
+   */
+  trackColorInteraction(hex: string) {
+    this.preferenceLearning.recordInteraction(hex, true);
+  }
+
+  /**
+   * الحصول على تنبؤ ML للون
+   */
+  getColorPreference(hex: string): number {
+    return this.preferenceLearning.predictPreference(hex);
+  }
+
+  /**
+   * تصنيف اللون بناءً على ML
+   */
+  getColorClassification(hex: string): 'preferred' | 'neutral' | 'disliked' {
+    return this.preferenceLearning.classifyColor(hex);
+  }
+
+  /**
+   * تدريب النموذج يدوياً
+   */
+  async trainModel() {
+    if (!this.canTrain()) {
+      this.showToast(`Need at least 20 samples. Currently have ${this.learningState().samplesCount}.`);
+      return;
+    }
+
+    this.isTraining.set(true);
+    
+    try {
+      const history = await this.preferenceLearning.train(false);
+      const lastEpoch = history[history.length - 1];
+      
+      if (lastEpoch) {
+        this.showToast(`Model trained! Accuracy: ${(lastEpoch.valAccuracy * 100).toFixed(1)}%`);
+      } else {
+        this.showToast('Model trained successfully!');
+      }
+    } catch (error) {
+      this.showToast(`Training failed: ${(error as Error).message}`);
+      console.error('Training error:', error);
+    } finally {
+      this.isTraining.set(false);
+    }
+  }
+
+  /**
+   * إعادة ضبط بيانات التعلم
+   */
+  resetLearning() {
+    if (confirm('This will reset all learned preferences. Are you sure?')) {
+      this.preferenceLearning.reset();
+      this.showToast('Learning data has been reset');
+    }
+  }
+
+  /**
+   * تصدير بيانات التعلم
+   */
+  exportLearningData() {
+    const data = this.preferenceLearning.export();
+    const blob = new Blob([data], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'chromagen-preferences.json';
+    link.click();
+    URL.revokeObjectURL(url);
+    this.showToast('Preferences exported!');
+  }
+
+  /**
+   * استيراد بيانات التعلم
+   */
+  importLearningData(event: Event) {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = e.target?.result as string;
+        this.preferenceLearning.import(data);
+        this.showToast('Preferences imported successfully!');
+      } catch (error) {
+        this.showToast('Failed to import preferences');
+        console.error('Import error:', error);
+      }
+    };
+    reader.readAsText(file);
+    
+    // Reset input
+    input.value = '';
+  }
+
+  /**
+   * إضافة تقييم صريح للون
+   */
+  rateColor(hex: string, isPreferred: boolean) {
+    if (isPreferred) {
+      this.preferenceLearning.addPreferredColor(hex, 'explicit');
+      this.showToast(`Marked ${hex} as preferred`);
+    } else {
+      this.preferenceLearning.addDislikedColor(hex, 'explicit');
+      this.showToast(`Marked ${hex} as disliked`);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // History & Utilities
+  // ═══════════════════════════════════════════════════════════════════════════
 
   addToHistory(prompt: string, palette: Palette) {
     this.history.update(prev => {
-      // Avoid duplicates if possible
       const newItem = { prompt, palette };
       const newHistory = [newItem, ...prev].slice(0, 10);
       localStorage.setItem('chromagen_history', JSON.stringify(newHistory));
@@ -332,7 +515,7 @@ export class AppComponent implements OnInit {
   loadFromHistory(item: HistoryItem) {
     this.currentPalette.set(item.palette);
     this.prompt.set(item.prompt);
-    this.variations.set([]); // clear variations view
+    this.variations.set([]);
     this.viewMode.set('generator');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
@@ -359,6 +542,14 @@ export class AppComponent implements OnInit {
     });
   }
 
+  /**
+   * نسخ اللون مع تسجيل التفاعل
+   */
+  copyColorWithTracking(hex: string) {
+    this.trackColorInteraction(hex);
+    this.copyToClipboard(hex);
+  }
+
   showToast(msg: string) {
     this.toastMessage.set(msg);
     setTimeout(() => this.toastMessage.set(null), 3000);
@@ -373,5 +564,10 @@ export class AppComponent implements OnInit {
       textColor: (yiq >= 128) ? '#1e293b' : '#f8fafc',
       luminance: yiq
     };
+  }
+
+  // Helper for template
+  mathMin(a: number, b: number): number {
+    return Math.min(a, b);
   }
 }
