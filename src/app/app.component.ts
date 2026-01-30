@@ -1,15 +1,15 @@
 import { Component, signal, inject, computed, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { AiService } from './services/ai.service';
-import { AuthService } from './services/auth.service';
-import { ExportService } from './services/export.service';
-import { ColorMathService, RGBColor } from './services/color-math.service';
-import { PreferenceLearningService } from './services/preference-learning.service';
-import { Palette, Color, HistoryItem } from './types';
-import { LoaderComponent } from './components/loader.component';
-import { CopyIconComponent } from './components/copy-icon.component';
-import { AuthModalComponent } from './components/auth-modal.component';
+import { AiService } from './core/services/ai.service';
+import { AuthService } from './core/services/auth.service';
+import { ExportService } from './core/services/export.service';
+import { ColorMathService, RGBColor } from './core/services/color-math.service';
+import { PreferenceLearningService } from './core/services/preference-learning.service';
+import { Palette, Color, HistoryItem } from './core/models/types';
+import { LoaderComponent } from './shared/components/loader.component';
+import { CopyIconComponent } from './shared/components/copy-icon.component';
+import { AuthModalComponent } from './shared/components/auth-modal.component';
 
 @Component({
   selector: 'app-root',

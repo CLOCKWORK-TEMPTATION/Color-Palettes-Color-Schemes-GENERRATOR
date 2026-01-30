@@ -1,5 +1,5 @@
 import { Injectable, signal, effect } from '@angular/core';
-import { User, Palette } from '../types';
+import { User, Palette } from '../models/types';
 
 @Injectable({
   providedIn: 'root'
