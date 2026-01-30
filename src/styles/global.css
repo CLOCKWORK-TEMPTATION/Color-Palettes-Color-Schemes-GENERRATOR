@@ -1,0 +1,42 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   ChromaGen AI - Global Styles
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Base Typography */
+body {
+  font-family: 'Inter', sans-serif;
+  background-color: #0f172a; /* Slate 900 */
+  color: #f8fafc;
+}
+
+/* Custom scrollbar for webkit */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1e293b;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #475569;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+/* Animation utilities */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.2s ease-out;
+}

@@ -6,7 +6,7 @@
     "app": {
       "projectType": "application",
       "root": "",
-      "sourceRoot": "./",
+      "sourceRoot": "./src",
       "prefix": "app",
       "architect": {
         "build": {
@@ -17,11 +17,25 @@
               "browser": "."
             },
             "browser": "index.tsx",
-            "tsConfig": "tsconfig.json"
+            "tsConfig": "tsconfig.json",
+            "index": "index.html",
+            "assets": [
+              {
+                "glob": "**/*",
+                "input": "src/assets",
+                "output": "assets"
+              }
+            ],
+            "styles": [
+              "src/styles/global.css"
+            ]
           },
           "configurations": {
             "production": {
-              "outputHashing": "all"
+              "outputHashing": "all",
+              "optimization": {
+                "fonts": false
+              }
             },
             "development": {
               "optimization": false,

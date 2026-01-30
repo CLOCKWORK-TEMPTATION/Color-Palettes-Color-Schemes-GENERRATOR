@@ -829,8 +829,8 @@ class DeltaE2000Calculator implements IDeltaECalculator {
     const SH = 1 + 0.015 * CBarPrime * T;
 
     // الخطوة 5: حساب RT
-    const deltaTheta = 30 * Math.exp(-((hBarPrime - 275) / 25) ** 2);
-    const RC = 2 * Math.sqrt(CBarPrime ** 7 / (CBarPrime ** 7 + 25 ** 7));
+    const deltaTheta = 30 * Math.exp(-(((hBarPrime - 275) / 25) ** 2));
+    const RC = 2 * Math.sqrt((CBarPrime ** 7) / ((CBarPrime ** 7) + (25 ** 7)));
     const RT = -RC * Math.sin(MathUtils.toRadians(2 * deltaTheta));
 
     // النتيجة النهائية

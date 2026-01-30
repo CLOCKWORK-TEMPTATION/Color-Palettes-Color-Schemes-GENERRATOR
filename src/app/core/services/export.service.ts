@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { Palette } from '../types';
+import { Palette } from '../models/types';
 
 @Injectable({
   providedIn: 'root'
